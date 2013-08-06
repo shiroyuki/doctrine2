@@ -2480,6 +2480,9 @@ class UnitOfWork implements PropertyChangedListener
             $id = array($class->identifier[0] => $idHash);
         }
 
+        // Enable the post-load event trigger by default.
+        $triggerPostLoadEvent = true;
+
         if (isset($this->identityMap[$class->rootEntityName][$idHash])) {
             $entity = $this->identityMap[$class->rootEntityName][$idHash];
             $oid = spl_object_hash($entity);
@@ -2505,15 +2508,13 @@ class UnitOfWork implements PropertyChangedListener
             if ($entity instanceof Proxy && ! $entity->__isInitialized()) {
                 $entity->__setInitialized(true);
 
-                $overrideLocalValues = true;
+                $overrideLocalValues  = true;
+
+                // Disable the post-load event trigger for uninitialized proxies.
+                $triggerPostLoadEvent = false;
 
                 if ($entity instanceof NotifyPropertyChanged) {
                     $entity->addPropertyChangedListener($this);
-                }
-
-                // inject ObjectManager into just loaded proxies.
-                if ($overrideLocalValues && $entity instanceof ObjectManagerAware) {
-                    $entity->injectObjectManager($this->em, $class);
                 }
 
             } else {
@@ -2524,10 +2525,14 @@ class UnitOfWork implements PropertyChangedListener
                     $overrideLocalValues = $hints[Query::HINT_REFRESH_ENTITY] === $entity;
                 }
 
-                // inject ObjectManager upon refresh.
-                if ($overrideLocalValues && $entity instanceof ObjectManagerAware) {
-                    $entity->injectObjectManager($this->em, $class);
-                }
+                // Only trigger the post-load event if overriding the local values is required.
+                $triggerPostLoadEvent = $overrideLocalValues;
+            }
+
+            // Inject ObjectManager if the entity has been refreshed or the proxy
+            // has just been loaded.
+            if ($overrideLocalValues && $entity instanceof ObjectManagerAware) {
+                $entity->injectObjectManager($this->em, $class);
             }
 
             if ($overrideLocalValues) {
@@ -2713,7 +2718,7 @@ class UnitOfWork implements PropertyChangedListener
             }
         }
 
-        if ($overrideLocalValues) {
+        if ($triggerPostLoadEvent) {
             $invoke = $this->listenersInvoker->getSubscribedSystems($class, Events::postLoad);
 
             if ($invoke !== ListenersInvoker::INVOKE_NONE) {
